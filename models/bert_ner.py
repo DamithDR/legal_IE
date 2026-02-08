@@ -144,8 +144,8 @@ def predict_bert(
 
     print(f"\nEvaluating {model_key} from {checkpoint_path}")
 
-    tokenizer = AutoTokenizer.from_pretrained(checkpoint_path)
-    model = AutoModelForTokenClassification.from_pretrained(checkpoint_path)
+    tokenizer = AutoTokenizer.from_pretrained(checkpoint_path, local_files_only=True)
+    model = AutoModelForTokenClassification.from_pretrained(checkpoint_path, local_files_only=True)
 
     max_length = config.TRAIN_CONFIG["max_seq_length"]
     tokenize_fn = partial(
