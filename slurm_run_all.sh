@@ -12,7 +12,7 @@
 #SBATCH --partition=a2000-48h
 #SBATCH --output=log/master_%A.log
 #SBATCH --mail-type=END,FAIL
-#SBATCH --time=00:05:00
+#SBATCH --time=12:00:00
 
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 VENV="${PROJECT_DIR}/venv/bin/activate"
@@ -33,7 +33,7 @@ BERT1_JOB=$(sbatch --parsable <<EOF
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=24G
-#SBATCH --time=48:00:00
+#SBATCH --time=12:00:00
 
 source "${VENV}"
 cd "${PROJECT_DIR}"
@@ -56,7 +56,7 @@ BERT2_JOB=$(sbatch --parsable <<EOF
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=24G
-#SBATCH --time=48:00:00
+#SBATCH --time=12:00:00
 
 source "${VENV}"
 cd "${PROJECT_DIR}"
@@ -79,7 +79,7 @@ BERT3_JOB=$(sbatch --parsable <<EOF
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=24G
-#SBATCH --time=48:00:00
+#SBATCH --time=12:00:00
 
 source "${VENV}"
 cd "${PROJECT_DIR}"
@@ -101,7 +101,7 @@ LLM_JOB=$(sbatch --parsable <<EOF
 #SBATCH --mail-type=END,FAIL
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=24G
-#SBATCH --time=06:00:00
+#SBATCH --time=12:00:00
 
 source "${VENV}"
 cd "${PROJECT_DIR}"
@@ -123,7 +123,7 @@ sbatch --dependency=afterok:${BERT1_JOB}:${BERT2_JOB}:${BERT3_JOB}:${LLM_JOB} <<
 #SBATCH --mail-type=END,FAIL
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=24G
-#SBATCH --time=00:60:00
+#SBATCH --time=12:00:00
 
 source "${VENV}"
 cd "${PROJECT_DIR}"
