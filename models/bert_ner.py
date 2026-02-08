@@ -100,7 +100,7 @@ def train_bert_model(
         args=training_args,
         train_dataset=tokenized_train,
         eval_dataset=tokenized_eval,
-        tokenizer=tokenizer,
+        processing_class=tokenizer,
         data_collator=data_collator,
         compute_metrics=compute_metrics,
     )
@@ -161,7 +161,7 @@ def predict_bert(
 
     trainer = Trainer(
         model=model,
-        tokenizer=tokenizer,
+        processing_class=tokenizer,
         data_collator=data_collator,
     )
 
