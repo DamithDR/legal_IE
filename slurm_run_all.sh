@@ -9,7 +9,7 @@
 ###############################################################################
 
 #SBATCH --job-name=legal-ner-master
-#SBATCH --partition=a5000-48h
+#SBATCH --partition=a2000-48h
 #SBATCH --output=log/master_%A.log
 #SBATCH --mail-type=END,FAIL
 #SBATCH --time=00:05:00
@@ -27,7 +27,7 @@ echo "Timestamp: $(date)"
 BERT1_JOB=$(sbatch --parsable <<EOF
 #!/bin/bash
 #SBATCH --job-name=ner-bert-base
-#SBATCH --partition=a5000-48h
+#SBATCH --partition=a2000-48h
 #SBATCH --output=${PROJECT_DIR}/log/bert-base_%A.log
 #SBATCH --mail-type=END,FAIL
 #SBATCH --gres=gpu:1
@@ -50,7 +50,7 @@ echo "Submitted bert-base-uncased: ${BERT1_JOB}"
 BERT2_JOB=$(sbatch --parsable <<EOF
 #!/bin/bash
 #SBATCH --job-name=ner-legal-bert
-#SBATCH --partition=a5000-48h
+#SBATCH --partition=a2000-48h
 #SBATCH --output=${PROJECT_DIR}/log/legal-bert_%A.log
 #SBATCH --mail-type=END,FAIL
 #SBATCH --gres=gpu:1
@@ -73,7 +73,7 @@ echo "Submitted legal-bert: ${BERT2_JOB}"
 BERT3_JOB=$(sbatch --parsable <<EOF
 #!/bin/bash
 #SBATCH --job-name=ner-inlegal-bert
-#SBATCH --partition=a5000-48h
+#SBATCH --partition=a2000-48h
 #SBATCH --output=${PROJECT_DIR}/log/inlegal-bert_%A.log
 #SBATCH --mail-type=END,FAIL
 #SBATCH --gres=gpu:1
@@ -96,7 +96,7 @@ echo "Submitted InLegalBERT: ${BERT3_JOB}"
 LLM_JOB=$(sbatch --parsable <<EOF
 #!/bin/bash
 #SBATCH --job-name=ner-llm-eval
-#SBATCH --partition=a5000-48h
+#SBATCH --partition=a2000-48h
 #SBATCH --output=${PROJECT_DIR}/log/llm_%A.log
 #SBATCH --mail-type=END,FAIL
 #SBATCH --cpus-per-task=2
@@ -118,7 +118,7 @@ echo "Submitted LLM eval: ${LLM_JOB}"
 sbatch --dependency=afterok:${BERT1_JOB}:${BERT2_JOB}:${BERT3_JOB}:${LLM_JOB} <<EOF
 #!/bin/bash
 #SBATCH --job-name=ner-compare
-#SBATCH --partition=a5000-48h
+#SBATCH --partition=a2000-48h
 #SBATCH --output=${PROJECT_DIR}/log/compare_%A.log
 #SBATCH --mail-type=END,FAIL
 #SBATCH --cpus-per-task=1
