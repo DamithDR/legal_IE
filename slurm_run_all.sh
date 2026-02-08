@@ -32,6 +32,7 @@ BERT1_JOB=$(sbatch --parsable <<EOF
 #SBATCH --mail-type=END,FAIL
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=4
+#SBATCH --mem=12G
 #SBATCH --time=24:00:00
 
 source "${VENV}"
@@ -54,6 +55,7 @@ BERT2_JOB=$(sbatch --parsable <<EOF
 #SBATCH --mail-type=END,FAIL
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=4
+#SBATCH --mem=12G
 #SBATCH --time=24:00:00
 
 source "${VENV}"
@@ -76,6 +78,7 @@ BERT3_JOB=$(sbatch --parsable <<EOF
 #SBATCH --mail-type=END,FAIL
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=4
+#SBATCH --mem=12G
 #SBATCH --time=24:00:00
 
 source "${VENV}"
@@ -97,6 +100,7 @@ LLM_JOB=$(sbatch --parsable <<EOF
 #SBATCH --output=${PROJECT_DIR}/log/llm_%A.log
 #SBATCH --mail-type=END,FAIL
 #SBATCH --cpus-per-task=2
+#SBATCH --mem=12G
 #SBATCH --time=24:00:00
 
 source "${VENV}"
@@ -118,6 +122,7 @@ sbatch --dependency=afterok:${BERT1_JOB}:${BERT2_JOB}:${BERT3_JOB}:${LLM_JOB} <<
 #SBATCH --output=${PROJECT_DIR}/log/compare_%A.log
 #SBATCH --mail-type=END,FAIL
 #SBATCH --cpus-per-task=1
+#SBATCH --mem=12G
 #SBATCH --time=24:00:00
 
 source "${VENV}"
