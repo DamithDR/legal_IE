@@ -1,9 +1,8 @@
 #!/bin/bash
 ###############################################################################
 # SLURM Master Script — Legal NER Evaluation Pipeline
-# Submits separate jobs per model: each BERT model gets its own GPU.
-# LLM evaluation runs in parallel (CPU-only).
-# Comparison runs after all jobs complete.
+# Submits separate jobs per BERT model: each gets its own GPU.
+# Comparison runs after all BERT jobs complete.
 #
 # Usage: sbatch slurm_run_all.sh
 ###############################################################################
@@ -92,30 +91,8 @@ EOF
 )
 echo "Submitted InLegalBERT: ${BERT3_JOB}"
 
-# --- LLM Evaluation (no GPU, API calls only) ---
-LLM_JOB=$(sbatch --parsable <<EOF
-#!/bin/bash
-#SBATCH --job-name=ner-llm-eval
-#SBATCH --partition=a2000-48h
-#SBATCH --output=${PROJECT_DIR}/log/llm_%A.log
-#SBATCH --mail-type=END,FAIL
-#SBATCH --cpus-per-task=2
-#SBATCH --mem=11G
-#SBATCH --time=24:00:00
-
-source "${VENV}"
-cd "${PROJECT_DIR}"
-
-echo "=== LLM Evaluation Started: \$(date) ==="
-python3 main.py evaluate-llm --provider openai
-python3 main.py evaluate-llm --provider deepseek
-echo "=== LLM Evaluation Completed: \$(date) ==="
-EOF
-)
-echo "Submitted LLM eval: ${LLM_JOB}"
-
-# --- Comparison Report (runs after ALL jobs complete) ---
-sbatch --dependency=afterok:${BERT1_JOB}:${BERT2_JOB}:${BERT3_JOB}:${LLM_JOB} <<EOF
+# --- Comparison Report (runs after all BERT jobs complete) ---
+sbatch --dependency=afterok:${BERT1_JOB}:${BERT2_JOB}:${BERT3_JOB} <<EOF
 #!/bin/bash
 #SBATCH --job-name=ner-compare
 #SBATCH --partition=a2000-48h
@@ -139,8 +116,7 @@ echo "=== All jobs submitted ==="
 echo "  bert-base-uncased: ${BERT1_JOB}"
 echo "  legal-bert:        ${BERT2_JOB}"
 echo "  InLegalBERT:       ${BERT3_JOB}"
-echo "  LLM eval:          ${LLM_JOB}"
-echo "  Compare:           runs after all complete"
+echo "  Compare:           runs after all BERT jobs complete"
 echo ""
 echo "Monitor with: squeue -u \$USER"
 echo "Logs in:      ${PROJECT_DIR}/log/"
