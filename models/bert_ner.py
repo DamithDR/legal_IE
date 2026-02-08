@@ -190,7 +190,6 @@ def predict_bert(
     print(results["classification_report_str"])
 
     # Save results
-    results_path = config.RESULTS_DIR / f"{model_key}_results.json"
     save_data = {
         "model_name": model_key,
         "model_type": "bert",
@@ -199,8 +198,6 @@ def predict_bert(
         "macro_avg": results["macro_avg"],
         "per_entity": results["per_entity"],
     }
-    with open(results_path, "w") as f:
-        json.dump(save_data, f, indent=2)
-    print(f"Results saved to {results_path}")
+    config.save_results(model_key, save_data)
 
     return save_data

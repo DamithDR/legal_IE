@@ -1,4 +1,6 @@
+import json
 import os
+from datetime import datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -12,6 +14,35 @@ CHECKPOINTS_DIR = PROJECT_ROOT / "checkpoints"
 
 RESULTS_DIR.mkdir(exist_ok=True)
 CHECKPOINTS_DIR.mkdir(exist_ok=True)
+
+
+def save_results(name: str, data: dict) -> Path:
+    """
+    Save results with a timestamped copy and a latest copy.
+
+    Saves to:
+        results/{name}_results.json          (latest, used by comparison)
+        results/{name}_results_{timestamp}.json  (archived run)
+
+    Returns:
+        Path to the latest results file.
+    """
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    data["timestamp"] = timestamp
+
+    # Save timestamped archive
+    archive_path = RESULTS_DIR / f"{name}_results_{timestamp}.json"
+    with open(archive_path, "w") as f:
+        json.dump(data, f, indent=2)
+
+    # Save latest (for comparison module)
+    latest_path = RESULTS_DIR / f"{name}_results.json"
+    with open(latest_path, "w") as f:
+        json.dump(data, f, indent=2)
+
+    print(f"Results saved to {latest_path}")
+    print(f"Archived to {archive_path}")
+    return latest_path
 
 # --- Dataset ---
 DATASET_NAME = "opennyaiorg/InLegalNER"

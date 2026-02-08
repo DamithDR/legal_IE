@@ -1,6 +1,5 @@
 """Abstract base class for LLM-based NER evaluators."""
 
-import json
 import time
 from abc import ABC, abstractmethod
 
@@ -98,10 +97,6 @@ class LLMEvaluator(ABC):
             "macro_avg": results["macro_avg"],
             "per_entity": results["per_entity"],
         }
-
-        results_path = config.RESULTS_DIR / f"{provider_name}_results.json"
-        with open(results_path, "w") as f:
-            json.dump(save_data, f, indent=2)
-        print(f"Results saved to {results_path}")
+        config.save_results(provider_name, save_data)
 
         return save_data
