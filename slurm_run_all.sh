@@ -1,122 +1,42 @@
 #!/bin/bash
 ###############################################################################
-# SLURM Master Script — Legal NER Evaluation Pipeline
-# Submits separate jobs per BERT model: each gets its own GPU.
-# Comparison runs after all BERT jobs complete.
+# Submit BERT NER training jobs one by one via SLURM.
+# Each model runs sequentially (next job waits for previous to finish).
 #
-# Usage: sbatch slurm_run_all.sh
+# Usage: bash slurm_run_all.sh
 ###############################################################################
 
-#SBATCH --job-name=legal-ner-master
-#SBATCH --partition=a2000-48h
-#SBATCH --output=log/master_%A.log
-#SBATCH --mail-type=END,FAIL
-#SBATCH --time=24:00:00
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+LOG_DIR="${PROJECT_DIR}/log"
 
-PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
-VENV="${PROJECT_DIR}/venv/bin/activate"
+mkdir -p "${LOG_DIR}"
 
-mkdir -p "${PROJECT_DIR}/log"
-
-echo "=== Legal NER Pipeline — Submitting jobs ==="
+echo "=== Legal NER Pipeline — Submitting BERT jobs ==="
 echo "Project dir: ${PROJECT_DIR}"
 echo "Timestamp: $(date)"
 
-# --- BERT Model 1: bert-base-uncased (own GPU) ---
-BERT1_JOB=$(sbatch --parsable <<EOF
-#!/bin/bash
-#SBATCH --job-name=ner-bert-base
-#SBATCH --partition=a2000-48h
-#SBATCH --output=${PROJECT_DIR}/log/bert-base_%A.log
-#SBATCH --mail-type=END,FAIL
-#SBATCH --gres=gpu:1
-#SBATCH --cpus-per-task=4
-#SBATCH --mem=11G
-#SBATCH --time=24:00:00
-
-source "${VENV}"
-cd "${PROJECT_DIR}"
-
-echo "=== bert-base-uncased Started: \$(date) ==="
-python3 main.py train --model bert-base-uncased
-python3 main.py evaluate-bert --model bert-base-uncased
-echo "=== bert-base-uncased Completed: \$(date) ==="
-EOF
-)
+# --- BERT Model 1: bert-base-uncased ---
+BERT1_JOB=$(sbatch --parsable "${PROJECT_DIR}/scripts/run_bert.sh" bert-base-uncased)
 echo "Submitted bert-base-uncased: ${BERT1_JOB}"
 
-# --- BERT Model 2: legal-bert (own GPU) ---
-BERT2_JOB=$(sbatch --parsable <<EOF
-#!/bin/bash
-#SBATCH --job-name=ner-legal-bert
-#SBATCH --partition=a2000-48h
-#SBATCH --output=${PROJECT_DIR}/log/legal-bert_%A.log
-#SBATCH --mail-type=END,FAIL
-#SBATCH --gres=gpu:1
-#SBATCH --cpus-per-task=4
-#SBATCH --mem=11G
-#SBATCH --time=24:00:00
+# --- BERT Model 2: legal-bert (waits for Model 1) ---
+BERT2_JOB=$(sbatch --parsable --dependency=afterok:${BERT1_JOB} "${PROJECT_DIR}/scripts/run_bert.sh" legal-bert)
+echo "Submitted legal-bert: ${BERT2_JOB} (after ${BERT1_JOB})"
 
-source "${VENV}"
-cd "${PROJECT_DIR}"
+# --- BERT Model 3: InLegalBERT (waits for Model 2) ---
+BERT3_JOB=$(sbatch --parsable --dependency=afterok:${BERT2_JOB} "${PROJECT_DIR}/scripts/run_bert.sh" InLegalBERT)
+echo "Submitted InLegalBERT: ${BERT3_JOB} (after ${BERT2_JOB})"
 
-echo "=== legal-bert Started: \$(date) ==="
-python3 main.py train --model legal-bert
-python3 main.py evaluate-bert --model legal-bert
-echo "=== legal-bert Completed: \$(date) ==="
-EOF
-)
-echo "Submitted legal-bert: ${BERT2_JOB}"
-
-# --- BERT Model 3: InLegalBERT (own GPU) ---
-BERT3_JOB=$(sbatch --parsable <<EOF
-#!/bin/bash
-#SBATCH --job-name=ner-inlegal-bert
-#SBATCH --partition=a2000-48h
-#SBATCH --output=${PROJECT_DIR}/log/inlegal-bert_%A.log
-#SBATCH --mail-type=END,FAIL
-#SBATCH --gres=gpu:1
-#SBATCH --cpus-per-task=4
-#SBATCH --mem=11G
-#SBATCH --time=24:00:00
-
-source "${VENV}"
-cd "${PROJECT_DIR}"
-
-echo "=== InLegalBERT Started: \$(date) ==="
-python3 main.py train --model InLegalBERT
-python3 main.py evaluate-bert --model InLegalBERT
-echo "=== InLegalBERT Completed: \$(date) ==="
-EOF
-)
-echo "Submitted InLegalBERT: ${BERT3_JOB}"
-
-# --- Comparison Report (runs after all BERT jobs complete) ---
-sbatch --dependency=afterok:${BERT1_JOB}:${BERT2_JOB}:${BERT3_JOB} <<EOF
-#!/bin/bash
-#SBATCH --job-name=ner-compare
-#SBATCH --partition=a2000-48h
-#SBATCH --output=${PROJECT_DIR}/log/compare_%A.log
-#SBATCH --mail-type=END,FAIL
-#SBATCH --cpus-per-task=1
-#SBATCH --mem=11G
-#SBATCH --time=24:00:00
-
-source "${VENV}"
-cd "${PROJECT_DIR}"
-
-echo "=== Comparison Report Started: \$(date) ==="
-python3 main.py compare
-echo "=== Comparison Report Completed: \$(date) ==="
-echo "Results saved to: ${PROJECT_DIR}/results/"
-EOF
+# --- Comparison Report (waits for all) ---
+COMPARE_JOB=$(sbatch --parsable --dependency=afterok:${BERT3_JOB} "${PROJECT_DIR}/scripts/run_compare.sh")
+echo "Submitted compare: ${COMPARE_JOB} (after ${BERT3_JOB})"
 
 echo ""
-echo "=== All jobs submitted ==="
-echo "  bert-base-uncased: ${BERT1_JOB}"
-echo "  legal-bert:        ${BERT2_JOB}"
-echo "  InLegalBERT:       ${BERT3_JOB}"
-echo "  Compare:           runs after all BERT jobs complete"
+echo "=== All jobs submitted (sequential chain) ==="
+echo "  1. bert-base-uncased: ${BERT1_JOB}"
+echo "  2. legal-bert:        ${BERT2_JOB}"
+echo "  3. InLegalBERT:       ${BERT3_JOB}"
+echo "  4. Compare:           ${COMPARE_JOB}"
 echo ""
 echo "Monitor with: squeue -u \$USER"
-echo "Logs in:      ${PROJECT_DIR}/log/"
+echo "Logs in:      ${LOG_DIR}/"
