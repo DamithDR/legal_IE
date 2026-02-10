@@ -47,6 +47,14 @@ def save_results(name: str, data: dict) -> Path:
 # --- Dataset ---
 DATASET_NAME = "opennyaiorg/InLegalNER"
 
+# --- ICDAC Dataset ---
+ICDAC_EXCEL_PATH = PROJECT_ROOT / "data" / "datasets" / "Indian_Court_Decision_Annotated_Corpus_xlsx.xlsx"
+
+# --- IE4Wills Dataset ---
+IE4WILLS_DATA_DIR = PROJECT_ROOT / "data" / "datasets" / "ie4wills"
+ICDAC_SPLIT_SEED = 42
+ICDAC_SPLIT_RATIOS = (0.8, 0.1, 0.1)
+
 # --- BERT Models to fine-tune ---
 BERT_MODELS = {
     "bert-base-uncased": "bert-base-uncased",
@@ -61,7 +69,7 @@ TRAIN_CONFIG = {
     "per_device_train_batch_size": 16,
     "per_device_eval_batch_size": 32,
     "weight_decay": 0.01,
-    "warmup_ratio": 0.1,
+    "warmup_steps": 500,
     "max_seq_length": 512,
     "eval_strategy": "epoch",
     "save_strategy": "epoch",

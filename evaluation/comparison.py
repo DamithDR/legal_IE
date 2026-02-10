@@ -13,13 +13,17 @@ import config
 
 
 def load_all_results() -> dict:
-    """Load all *_results.json files from the results directory."""
+    """Load all *_results.json files from the results directory.
+
+    Uses the filename stem (e.g. 'inlegalner_openai') as the key to avoid
+    collisions when the same model is evaluated on multiple datasets.
+    """
     results = {}
     for path in config.RESULTS_DIR.glob("*_results.json"):
         with open(path) as f:
             data = json.load(f)
-        model_name = data["model_name"]
-        results[model_name] = data
+        key = path.stem.replace("_results", "")
+        results[key] = data
     return results
 
 

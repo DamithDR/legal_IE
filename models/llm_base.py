@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 from tqdm import tqdm
 
 import config
-from models.prompt_builder import SYSTEM_PROMPT, build_user_prompt
+from models.prompt_builder import build_system_prompt, build_user_prompt
 from models.response_parser import parse_llm_response
 from evaluation.metrics import compute_ner_metrics
 
@@ -35,7 +35,8 @@ class LLMEvaluator(ABC):
             Predicted BIO tags.
         """
         user_prompt = build_user_prompt(tokens, few_shot_examples)
-        response = self.call_api(SYSTEM_PROMPT, user_prompt)
+        system_prompt = build_system_prompt()
+        response = self.call_api(system_prompt, user_prompt)
         pred_tags = parse_llm_response(response, tokens)
         return pred_tags
 
@@ -44,6 +45,7 @@ class LLMEvaluator(ABC):
         samples: list[dict],
         few_shot_examples: list[dict],
         provider_name: str,
+        dataset_name: str = "inlegalner",
     ) -> dict:
         """
         Evaluate multiple samples with rate limiting and error handling.
@@ -52,6 +54,7 @@ class LLMEvaluator(ABC):
             samples: List of dicts with 'tokens' and 'tags'.
             few_shot_examples: Few-shot examples for the prompt.
             provider_name: Name for results file (e.g. 'openai').
+            dataset_name: Dataset identifier for namespacing results.
 
         Returns:
             Results dict with metrics.
@@ -97,6 +100,6 @@ class LLMEvaluator(ABC):
             "macro_avg": results["macro_avg"],
             "per_entity": results["per_entity"],
         }
-        config.save_results(provider_name, save_data)
+        config.save_results(f"{dataset_name}_{provider_name}", save_data)
 
         return save_data

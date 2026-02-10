@@ -15,7 +15,7 @@ from transformers import (
 )
 
 import config
-from data.label_schema import id2label, label2id, LABEL_LIST
+from data import label_schema
 from data.loader import tokenize_and_align_labels
 from evaluation.metrics import compute_metrics_for_trainer, compute_ner_metrics
 
@@ -25,6 +25,7 @@ def train_bert_model(
     train_dataset,
     eval_dataset,
     tag_column: str = "ner_tags",
+    dataset_name: str = "inlegalner",
 ):
     """
     Fine-tune a BERT model on the NER task.
@@ -34,12 +35,13 @@ def train_bert_model(
         train_dataset: HuggingFace Dataset (train split).
         eval_dataset: HuggingFace Dataset (validation split).
         tag_column: Name of the NER tag column.
+        dataset_name: Dataset identifier for namespacing outputs.
 
     Returns:
         Tuple of (trainer, tokenizer, eval_results).
     """
     model_name_or_path = config.BERT_MODELS[model_key]
-    output_dir = config.CHECKPOINTS_DIR / model_key
+    output_dir = config.CHECKPOINTS_DIR / f"{dataset_name}_{model_key}"
 
     print(f"\n{'='*60}")
     print(f"Training: {model_key} ({model_name_or_path})")
@@ -50,9 +52,9 @@ def train_bert_model(
     tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
     model = AutoModelForTokenClassification.from_pretrained(
         model_name_or_path,
-        num_labels=len(LABEL_LIST),
-        id2label=id2label,
-        label2id=label2id,
+        num_labels=len(label_schema.LABEL_LIST),
+        id2label=label_schema.id2label,
+        label2id=label_schema.label2id,
     )
 
     # Tokenize datasets
@@ -72,7 +74,7 @@ def train_bert_model(
 
     # Compute metrics wrapper
     def compute_metrics(eval_preds):
-        return compute_metrics_for_trainer(eval_preds, id2label)
+        return compute_metrics_for_trainer(eval_preds, label_schema.id2label)
 
     # Training arguments
     training_args = TrainingArguments(
@@ -82,14 +84,13 @@ def train_bert_model(
         per_device_train_batch_size=config.TRAIN_CONFIG["per_device_train_batch_size"],
         per_device_eval_batch_size=config.TRAIN_CONFIG["per_device_eval_batch_size"],
         weight_decay=config.TRAIN_CONFIG["weight_decay"],
-        warmup_ratio=config.TRAIN_CONFIG["warmup_ratio"],
+        warmup_steps=config.TRAIN_CONFIG["warmup_steps"],
         eval_strategy=config.TRAIN_CONFIG["eval_strategy"],
         save_strategy=config.TRAIN_CONFIG["save_strategy"],
         load_best_model_at_end=config.TRAIN_CONFIG["load_best_model_at_end"],
         metric_for_best_model=config.TRAIN_CONFIG["metric_for_best_model"],
         greater_is_better=True,
         seed=config.TRAIN_CONFIG["seed"],
-        logging_dir=str(output_dir / "logs"),
         logging_steps=50,
         report_to="none",
     )
@@ -126,6 +127,7 @@ def predict_bert(
     test_dataset,
     tag_column: str = "ner_tags",
     checkpoint_path: str = None,
+    dataset_name: str = "inlegalner",
 ):
     """
     Run inference on the test set with a trained BERT model.
@@ -134,13 +136,14 @@ def predict_bert(
         model_key: Key into config.BERT_MODELS.
         test_dataset: HuggingFace Dataset (test split).
         tag_column: Name of the NER tag column.
-        checkpoint_path: Path to checkpoint (default: checkpoints/{model_key}/best_model).
+        checkpoint_path: Path to checkpoint (default: checkpoints/{dataset_name}_{model_key}/best_model).
+        dataset_name: Dataset identifier for namespacing outputs.
 
     Returns:
         Dict with evaluation metrics.
     """
     if checkpoint_path is None:
-        checkpoint_path = str(config.CHECKPOINTS_DIR / model_key / "best_model")
+        checkpoint_path = str(config.CHECKPOINTS_DIR / f"{dataset_name}_{model_key}" / "best_model")
 
     print(f"\nEvaluating {model_key} from {checkpoint_path}")
 
@@ -178,8 +181,8 @@ def predict_bert(
         pred_seq_filtered = []
         for p, l in zip(pred_seq, label_seq):
             if l != -100:
-                true_seq.append(id2label[l])
-                pred_seq_filtered.append(id2label[p])
+                true_seq.append(label_schema.id2label[l])
+                pred_seq_filtered.append(label_schema.id2label[p])
         true_labels.append(true_seq)
         pred_labels.append(pred_seq_filtered)
 
@@ -198,6 +201,6 @@ def predict_bert(
         "macro_avg": results["macro_avg"],
         "per_entity": results["per_entity"],
     }
-    config.save_results(model_key, save_data)
+    config.save_results(f"{dataset_name}_{model_key}", save_data)
 
     return save_data

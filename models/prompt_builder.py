@@ -1,10 +1,13 @@
 """Prompt templates and few-shot example formatting for LLM-based NER."""
 
-from data.label_schema import ENTITY_TYPES
+from data import label_schema
 
-SYSTEM_PROMPT = f"""You are an expert at Named Entity Recognition for Indian legal court judgments.
-Given a text, identify all named entities and classify each into exactly one of these {len(ENTITY_TYPES)} types:
-{', '.join(ENTITY_TYPES)}
+
+def build_system_prompt():
+    """Build the system prompt dynamically from the active label schema."""
+    return f"""You are an expert at Named Entity Recognition for Indian legal court judgments.
+Given a text, identify all named entities and classify each into exactly one of these {len(label_schema.ENTITY_TYPES)} types:
+{', '.join(label_schema.ENTITY_TYPES)}
 
 Return your answer as a JSON array of objects, each with "entity" (the exact text span from the input) and "type" (one of the entity types listed above).
 If no entities are found, return an empty array [].

@@ -3,7 +3,7 @@
 import json
 import re
 
-from data.label_schema import ENTITY_TYPES
+from data import label_schema
 
 
 def extract_json_from_response(response: str) -> list | None:
@@ -99,10 +99,10 @@ def spans_to_bio_tags(tokens: list[str], entities: list[dict]) -> list[str]:
             continue
 
         # Validate entity type
-        if entity_type not in ENTITY_TYPES:
+        if entity_type not in label_schema.ENTITY_TYPES:
             # Try case-insensitive match
             matched = False
-            for et in ENTITY_TYPES:
+            for et in label_schema.ENTITY_TYPES:
                 if et.lower() == entity_type.lower():
                     entity_type = et
                     matched = True
