@@ -1,4 +1,4 @@
-"""Legal NER Evaluation Pipeline — CLI entry point."""
+"""Legal IE Evaluation Pipeline — CLI entry point (NER + RE)."""
 
 import argparse
 import json
@@ -223,6 +223,142 @@ def _create_claude_evaluator():
     return ClaudeEvaluator(config.CLAUDE_MODEL, config.ANTHROPIC_API_KEY)
 
 
+# ===================================================================
+# RE (Relationship Extraction) commands — IE4Wills only
+# ===================================================================
+
+def _re_sample_cache_path():
+    return config.RESULTS_DIR / "ie4wills_re_llm_samples.json"
+
+
+def _save_re_sample_cache(documents, few_shot_examples):
+    cache = {
+        "documents": documents,
+        "few_shot_examples": few_shot_examples,
+    }
+    path = _re_sample_cache_path()
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(cache, f, indent=2, ensure_ascii=False)
+    print(f"RE sample cache saved to {path} ({len(documents)} docs, {len(few_shot_examples)} few-shot)")
+    return path
+
+
+def _load_re_sample_cache():
+    path = _re_sample_cache_path()
+    if not path.exists():
+        raise FileNotFoundError(
+            f"No RE sample cache found at {path}.\n"
+            f"Run 'python main.py prepare-re-samples' first."
+        )
+    with open(path, encoding="utf-8") as f:
+        cache = json.load(f)
+    docs = cache["documents"]
+    few_shot = cache["few_shot_examples"]
+    print(f"Loaded {len(docs)} cached documents and {len(few_shot)} few-shot examples from {path}")
+    return docs, few_shot
+
+
+def cmd_stats_re(args):
+    """Print RE dataset statistics for IE4Wills."""
+    from data.re_loader import print_re_dataset_stats
+    print_re_dataset_stats()
+
+
+def cmd_train_re(args):
+    """Fine-tune BERT model(s) for RE on IE4Wills."""
+    from data.re_loader import load_re_dataset
+    from models.bert_re import train_bert_re_model
+
+    train_instances = load_re_dataset("train", negative_ratio=args.negative_ratio)
+    eval_instances = load_re_dataset("validation", negative_ratio=0)
+
+    models_to_train = (
+        list(config.BERT_MODELS.keys()) if args.model == "all" else [args.model]
+    )
+
+    for model_key in models_to_train:
+        if model_key not in config.BERT_MODELS:
+            print(f"Unknown model: {model_key}. Available: {list(config.BERT_MODELS.keys())}")
+            continue
+        train_bert_re_model(model_key, train_instances, eval_instances)
+
+
+def cmd_evaluate_bert_re(args):
+    """Evaluate trained BERT RE model(s) on test set."""
+    from data.re_loader import load_re_dataset
+    from models.bert_re import predict_bert_re
+
+    # For BERT evaluation, include negatives to measure NO_RELATION classification
+    test_instances = load_re_dataset("test", negative_ratio=1.0)
+
+    models_to_eval = (
+        list(config.BERT_MODELS.keys()) if args.model == "all" else [args.model]
+    )
+
+    for model_key in models_to_eval:
+        if model_key not in config.BERT_MODELS:
+            print(f"Unknown model: {model_key}. Available: {list(config.BERT_MODELS.keys())}")
+            continue
+        predict_bert_re(model_key, test_instances, checkpoint_path=args.checkpoint)
+
+
+def cmd_prepare_re_samples(args):
+    """Prepare and cache RE test documents + few-shot examples."""
+    from data.re_loader import load_re_documents, get_re_few_shot_examples
+
+    cache_path = _re_sample_cache_path()
+    if cache_path.exists() and not args.resample:
+        print(f"RE sample cache already exists at {cache_path}")
+        print("Use --resample to regenerate.")
+        return
+
+    documents = load_re_documents(split="test")
+    few_shot = get_re_few_shot_examples(n=config.RE_FEW_SHOT_COUNT)
+    _save_re_sample_cache(documents, few_shot)
+
+
+def cmd_evaluate_llm_re(args):
+    """Evaluate LLM(s) for RE using cached documents."""
+    from models.llm_re_providers import OpenAIREEvaluator, DeepSeekREEvaluator, ClaudeREEvaluator
+
+    try:
+        documents, few_shot = _load_re_sample_cache()
+    except FileNotFoundError as e:
+        print(f"Error: {e}")
+        return
+
+    print(f"RE LLM evaluation on {len(documents)} documents")
+
+    providers = {
+        "openai": lambda: _create_re_provider(OpenAIREEvaluator, config.OPENAI_MODEL, config.OPENAI_API_KEY, "OPENAI_API_KEY"),
+        "deepseek": lambda: _create_re_provider(DeepSeekREEvaluator, config.DEEPSEEK_MODEL, config.DEEPSEEK_API_KEY, "DEEPSEEK_API_KEY"),
+        "claude": lambda: _create_re_provider(ClaudeREEvaluator, config.CLAUDE_MODEL, config.ANTHROPIC_API_KEY, "ANTHROPIC_API_KEY"),
+    }
+
+    providers_to_eval = (
+        list(providers.keys()) if args.provider == "all" else [args.provider]
+    )
+
+    for provider_name in providers_to_eval:
+        if provider_name not in providers:
+            print(f"Unknown provider: {provider_name}. Available: {list(providers.keys())}")
+            continue
+        try:
+            evaluator = providers[provider_name]()
+            if evaluator is None:
+                continue
+            evaluator.evaluate_dataset(documents, few_shot, provider_name)
+        except Exception as e:
+            print(f"Error evaluating RE {provider_name}: {e}")
+
+
+def _create_re_provider(cls, model_id, api_key, key_name):
+    if not api_key:
+        print(f"{key_name} not set in .env — skipping.")
+        return None
+    return cls(model_id, api_key)
+
+
 def cmd_compare(args):
     """Generate comparison report from saved results."""
     from evaluation.comparison import generate_comparison_report
@@ -305,6 +441,14 @@ Examples:
   python main.py export-latex                           # Generate LaTeX tables
   python main.py run-all                                # Full pipeline
   python main.py run-all --dataset icdac                # Full pipeline on ICDAC
+
+  # Relationship Extraction (IE4Wills only):
+  python main.py stats-re                               # Print RE dataset statistics
+  python main.py train-re --model all                   # Fine-tune BERT RE models
+  python main.py evaluate-bert-re --model all           # Evaluate BERT RE models
+  python main.py prepare-re-samples                     # Cache RE test documents
+  python main.py evaluate-llm-re --provider openai      # Evaluate LLM for RE
+  python main.py evaluate-llm-re --provider all         # Evaluate all LLMs for RE
         """,
     )
 
@@ -390,6 +534,52 @@ Examples:
     sub = subparsers.add_parser("run-all", help="Run full pipeline")
     _add_dataset_arg(sub)
     sub.set_defaults(func=cmd_run_all)
+
+    # --- RE subcommands (IE4Wills only) ---
+
+    # stats-re
+    sub = subparsers.add_parser("stats-re", help="Print RE dataset statistics for IE4Wills")
+    sub.set_defaults(func=cmd_stats_re)
+
+    # train-re
+    sub = subparsers.add_parser("train-re", help="Fine-tune BERT model(s) for RE on IE4Wills")
+    sub.add_argument(
+        "--model",
+        default="all",
+        help=f"Model to train: {list(config.BERT_MODELS.keys())} or 'all'",
+    )
+    sub.add_argument(
+        "--negative-ratio",
+        type=float,
+        default=config.RE_NEGATIVE_RATIO,
+        help=f"Ratio of negative to positive examples (default: {config.RE_NEGATIVE_RATIO})",
+    )
+    sub.set_defaults(func=cmd_train_re)
+
+    # evaluate-bert-re
+    sub = subparsers.add_parser("evaluate-bert-re", help="Evaluate trained BERT RE model(s)")
+    sub.add_argument(
+        "--model",
+        default="all",
+        help=f"Model to evaluate: {list(config.BERT_MODELS.keys())} or 'all'",
+    )
+    sub.add_argument("--checkpoint", default=None, help="Path to model checkpoint")
+    sub.set_defaults(func=cmd_evaluate_bert_re)
+
+    # prepare-re-samples
+    sub = subparsers.add_parser("prepare-re-samples", help="Cache RE test documents + few-shot examples")
+    sub.add_argument("--resample", action="store_true", help="Regenerate cache")
+    sub.set_defaults(func=cmd_prepare_re_samples)
+
+    # evaluate-llm-re
+    sub = subparsers.add_parser("evaluate-llm-re", help="Evaluate LLM(s) for RE on IE4Wills")
+    sub.add_argument(
+        "--provider",
+        default="all",
+        choices=["openai", "deepseek", "claude", "all"],
+        help="LLM provider to evaluate",
+    )
+    sub.set_defaults(func=cmd_evaluate_llm_re)
 
     args = parser.parse_args()
 

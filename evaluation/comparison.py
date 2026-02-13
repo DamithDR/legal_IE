@@ -12,16 +12,26 @@ from tabulate import tabulate
 import config
 
 
-def load_all_results() -> dict:
+def load_all_results(task_filter: str = None) -> dict:
     """Load all *_results.json files from the results directory.
 
     Uses the filename stem (e.g. 'inlegalner_openai') as the key to avoid
     collisions when the same model is evaluated on multiple datasets.
+
+    Args:
+        task_filter: If set ('ner' or 're'), only include results matching that task.
     """
     results = {}
     for path in config.RESULTS_DIR.glob("*_results.json"):
         with open(path) as f:
             data = json.load(f)
+
+        # Apply task filter
+        if task_filter:
+            result_task = data.get("task", "ner")
+            if result_task != task_filter:
+                continue
+
         key = path.stem.replace("_results", "")
         results[key] = data
     return results
@@ -68,35 +78,42 @@ def generate_comparison_report(results: dict = None):
 
     overall_df.to_csv(config.RESULTS_DIR / "overall_comparison.csv", index=False)
 
-    # --- Per-entity F1 comparison ---
-    all_entity_types = set()
+    # --- Per-entity/relation F1 comparison ---
+    all_detail_types = set()
     for data in results.values():
-        all_entity_types.update(data.get("per_entity", {}).keys())
-    all_entity_types = sorted(all_entity_types)
+        # Support both NER (per_entity) and RE (per_relation) results
+        detail = data.get("per_entity") or data.get("per_relation", {})
+        all_detail_types.update(detail.keys())
+    all_detail_types = sorted(all_detail_types)
 
-    per_entity_rows = []
+    per_detail_rows = []
     for model_name, data in results.items():
         row = {"Model": model_name}
-        for etype in all_entity_types:
-            etype_data = data.get("per_entity", {}).get(etype, {})
-            row[etype] = etype_data.get("f1", 0.0)
-        per_entity_rows.append(row)
+        detail = data.get("per_entity") or data.get("per_relation", {})
+        for dtype in all_detail_types:
+            dtype_data = detail.get(dtype, {})
+            row[dtype] = dtype_data.get("f1", 0.0)
+        per_detail_rows.append(row)
 
-    per_entity_df = pd.DataFrame(per_entity_rows)
+    per_detail_df = pd.DataFrame(per_detail_rows)
+
+    has_re = any(d.get("task") == "re" for d in results.values())
+    detail_label = "PER-ENTITY/RELATION" if has_re else "PER-ENTITY"
 
     print("\n" + "=" * 80)
-    print("PER-ENTITY F1 COMPARISON")
+    print(f"{detail_label} F1 COMPARISON")
     print("=" * 80)
-    print(tabulate(per_entity_df, headers="keys", tablefmt="grid", showindex=False, floatfmt=".4f"))
+    print(tabulate(per_detail_df, headers="keys", tablefmt="grid", showindex=False, floatfmt=".4f"))
 
-    per_entity_df.to_csv(config.RESULTS_DIR / "per_entity_comparison.csv", index=False)
+    per_detail_df.to_csv(config.RESULTS_DIR / "per_entity_comparison.csv", index=False)
 
     # --- Save detailed results ---
-    with open(config.RESULTS_DIR / "detailed_results.json", "w") as f:
+    # NB: filename must NOT match *_results.json to avoid being re-loaded
+    with open(config.RESULTS_DIR / "all_detailed.json", "w") as f:
         json.dump(results, f, indent=2)
 
     # --- Comparison chart ---
-    _generate_chart(overall_df, per_entity_df, all_entity_types)
+    _generate_chart(overall_df, per_detail_df, all_detail_types)
 
     print(f"\nAll reports saved to {config.RESULTS_DIR}/")
 

@@ -94,3 +94,12 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 OPENAI_MODEL = "gpt-4o"
 DEEPSEEK_MODEL = "deepseek-chat"
 CLAUDE_MODEL = "claude-sonnet-4-20250514"
+
+# --- RE Configuration ---
+RE_TRAIN_CONFIG = {
+    **TRAIN_CONFIG,
+    "metric_for_best_model": "eval_f1_macro",
+    "num_train_epochs": 10,
+}
+RE_NEGATIVE_RATIO = 1.0   # ratio of negative to positive examples for BERT RE training
+RE_FEW_SHOT_COUNT = 3     # fewer than NER because RE examples are larger in prompt
