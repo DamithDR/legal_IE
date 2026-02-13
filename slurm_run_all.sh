@@ -1,7 +1,8 @@
 #!/bin/bash
 ###############################################################################
 # Submit BERT NER training jobs via SLURM.
-# All models run in parallel on separate GPUs, for both datasets.
+# All models run in parallel on separate GPUs, for all datasets.
+# LLM evaluation is run locally (not via SLURM).
 #
 # Usage: cd /path/to/legal_IE && bash slurm_run_all.sh
 ###############################################################################
@@ -81,7 +82,7 @@ IE4_BERT3_JOB=$(sbatch --parsable \
     "${PROJECT_DIR}/scripts/run_bert.sh" InLegalBERT "${PROJECT_DIR}" ie4wills)
 echo "Submitted ie4wills/InLegalBERT: ${IE4_BERT3_JOB}"
 
-# --- Comparison Report (waits for all 9 to finish) ---
+# --- Comparison Report (waits for all 9 BERT jobs to finish) ---
 ALL_JOBS="${INL_BERT1_JOB}:${INL_BERT2_JOB}:${INL_BERT3_JOB}:${ICD_BERT1_JOB}:${ICD_BERT2_JOB}:${ICD_BERT3_JOB}:${IE4_BERT1_JOB}:${IE4_BERT2_JOB}:${IE4_BERT3_JOB}"
 
 COMPARE_JOB=$(sbatch --parsable \
@@ -106,6 +107,10 @@ echo "    bert-base-uncased: ${IE4_BERT1_JOB}"
 echo "    legal-bert:        ${IE4_BERT2_JOB}"
 echo "    InLegalBERT:       ${IE4_BERT3_JOB}"
 echo "  Compare:             ${COMPARE_JOB} (after all 9)"
+echo ""
+echo "LLM evaluation is run locally:"
+echo "  python main.py prepare-samples --dataset all"
+echo "  python main.py evaluate-llm --dataset all"
 echo ""
 echo "Monitor with: squeue -u \$USER"
 echo "Logs in:      ${LOG_DIR}/"

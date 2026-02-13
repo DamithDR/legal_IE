@@ -8,6 +8,8 @@ import config
 from data.loader import load_ner_dataset, get_few_shot_examples, get_llm_samples, print_dataset_stats
 from data.label_schema import set_active_schema
 
+_ALL_DATASETS = ["inlegalner", "icdac", "ie4wills"]
+
 
 def _sample_cache_path(dataset_name: str):
     """Return the path for the cached LLM sample file."""
@@ -118,36 +120,47 @@ def cmd_evaluate_bert(args):
         )
 
 
-def cmd_prepare_samples(args):
-    """Prepare and cache LLM test samples for consistent evaluation."""
-    dataset, tag_column = _init_dataset(args)
-
-    cache_path = _sample_cache_path(args.dataset)
-    if cache_path.exists() and not args.resample:
+def _prepare_samples_for_dataset(dataset_name, sample_size, full_test, resample):
+    """Prepare and cache LLM test samples for a single dataset."""
+    cache_path = _sample_cache_path(dataset_name)
+    if cache_path.exists() and not resample:
         print(f"Sample cache already exists at {cache_path}")
         print("Use --resample to regenerate.")
         return
 
-    sample_size = None if args.full_test else args.sample_size
+    set_active_schema(dataset_name)
+    dataset, tag_column = load_ner_dataset(dataset_name)
+
+    n = None if full_test else sample_size
     test_split = "test" if "test" in dataset else "validation"
-    samples = get_llm_samples(dataset, split=test_split, n=sample_size, tag_column=tag_column)
+    samples = get_llm_samples(dataset, split=test_split, n=n, tag_column=tag_column)
     few_shot_examples = get_few_shot_examples(dataset, n=config.LLM_FEW_SHOT_COUNT, tag_column=tag_column)
 
-    _save_sample_cache(args.dataset, samples, few_shot_examples, len(samples), len(few_shot_examples))
+    _save_sample_cache(dataset_name, samples, few_shot_examples, len(samples), len(few_shot_examples))
 
 
-def cmd_evaluate_llm(args):
-    """Evaluate LLM(s) on the test set via API."""
-    set_active_schema(args.dataset)
+def cmd_prepare_samples(args):
+    """Prepare and cache LLM test samples for consistent evaluation."""
+    datasets = _ALL_DATASETS if args.dataset == "all" else [args.dataset]
+    for ds in datasets:
+        print(f"\n{'='*60}")
+        print(f"Preparing samples for {ds}")
+        print(f"{'='*60}")
+        _prepare_samples_for_dataset(ds, args.sample_size, args.full_test, args.resample)
+
+
+def _evaluate_llm_for_dataset(dataset_name, provider_arg):
+    """Run LLM evaluation for a single dataset using cached samples."""
+    set_active_schema(dataset_name)
 
     # Load from cache
     try:
-        samples, few_shot_examples = _load_sample_cache(args.dataset)
+        samples, few_shot_examples = _load_sample_cache(dataset_name)
     except FileNotFoundError as e:
         print(f"Error: {e}")
-        sys.exit(1)
+        return
 
-    print(f"LLM evaluation on {len(samples)} samples")
+    print(f"LLM evaluation on {len(samples)} samples for {dataset_name}")
 
     providers = {
         "openai": _create_openai_evaluator,
@@ -156,7 +169,7 @@ def cmd_evaluate_llm(args):
     }
 
     providers_to_eval = (
-        list(providers.keys()) if args.provider == "all" else [args.provider]
+        list(providers.keys()) if provider_arg == "all" else [provider_arg]
     )
 
     for provider_name in providers_to_eval:
@@ -168,9 +181,19 @@ def cmd_evaluate_llm(args):
             evaluator = providers[provider_name]()
             if evaluator is None:
                 continue
-            evaluator.evaluate_dataset(samples, few_shot_examples, provider_name, dataset_name=args.dataset)
+            evaluator.evaluate_dataset(samples, few_shot_examples, provider_name, dataset_name=dataset_name)
         except Exception as e:
             print(f"Error evaluating {provider_name}: {e}")
+
+
+def cmd_evaluate_llm(args):
+    """Evaluate LLM(s) on the test set via API."""
+    datasets = _ALL_DATASETS if args.dataset == "all" else [args.dataset]
+    for ds in datasets:
+        print(f"\n{'='*60}")
+        print(f"LLM evaluation for {ds}")
+        print(f"{'='*60}")
+        _evaluate_llm_for_dataset(ds, args.provider)
 
 
 def _create_openai_evaluator():
@@ -246,13 +269,19 @@ def cmd_stats(args):
     print_dataset_stats(dataset, tag_column)
 
 
-def _add_dataset_arg(parser):
+def _add_dataset_arg(parser, allow_all=False):
     """Add the --dataset argument to a subparser."""
+    choices = _ALL_DATASETS + ["all"] if allow_all else list(_ALL_DATASETS)
+    help_text = (
+        "Dataset to use (default: inlegalner). Use 'all' to process all datasets."
+        if allow_all
+        else "Dataset to use: 'inlegalner' (default), 'icdac', or 'ie4wills'"
+    )
     parser.add_argument(
         "--dataset",
         default="inlegalner",
-        choices=["inlegalner", "icdac", "ie4wills"],
-        help="Dataset to use: 'inlegalner' (default), 'icdac', or 'ie4wills'",
+        choices=choices,
+        help=help_text,
     )
 
 
@@ -268,9 +297,10 @@ Examples:
   python main.py train --model all                      # Fine-tune all BERT models
   python main.py train --model all --dataset icdac      # Fine-tune on ICDAC
   python main.py evaluate-bert --model all              # Evaluate all BERT models
-  python main.py prepare-samples --dataset inlegalner   # Cache LLM test samples
+  python main.py prepare-samples --dataset all           # Cache LLM test samples for all datasets
+  python main.py prepare-samples --dataset inlegalner   # Cache LLM test samples for one dataset
   python main.py evaluate-llm --provider openai         # Evaluate ChatGPT (uses cache)
-  python main.py evaluate-llm --provider all            # Evaluate all LLMs
+  python main.py evaluate-llm --dataset all             # Evaluate all LLMs on all datasets
   python main.py compare                                # Generate comparison report
   python main.py export-latex                           # Generate LaTeX tables
   python main.py run-all                                # Full pipeline
@@ -324,7 +354,7 @@ Examples:
         action="store_true",
         help="Regenerate cache even if it already exists",
     )
-    _add_dataset_arg(sub)
+    _add_dataset_arg(sub, allow_all=True)
     sub.set_defaults(func=cmd_prepare_samples)
 
     # evaluate-llm
@@ -335,7 +365,7 @@ Examples:
         choices=["openai", "deepseek", "claude", "all"],
         help="LLM provider to evaluate",
     )
-    _add_dataset_arg(sub)
+    _add_dataset_arg(sub, allow_all=True)
     sub.set_defaults(func=cmd_evaluate_llm)
 
     # compare

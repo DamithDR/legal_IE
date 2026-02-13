@@ -2,10 +2,18 @@
 
 from data import label_schema
 
+# Dataset-specific domain descriptions for system prompts
+_DATASET_DOMAIN = {
+    "inlegalner": "Indian legal court judgments",
+    "icdac": "Indian court decisions",
+    "ie4wills": "US legal wills and testamentary documents",
+}
 
-def build_system_prompt():
-    """Build the system prompt dynamically from the active label schema."""
-    return f"""You are an expert at Named Entity Recognition for Indian legal court judgments.
+
+def build_system_prompt(dataset_name="inlegalner"):
+    """Build the system prompt dynamically from the active label schema and dataset context."""
+    domain = _DATASET_DOMAIN.get(dataset_name, "legal documents")
+    return f"""You are an expert at Named Entity Recognition for {domain}.
 Given a text, identify all named entities and classify each into exactly one of these {len(label_schema.ENTITY_TYPES)} types:
 {', '.join(label_schema.ENTITY_TYPES)}
 

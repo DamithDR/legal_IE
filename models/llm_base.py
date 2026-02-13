@@ -23,19 +23,20 @@ class LLMEvaluator(ABC):
         """Make a single API call. Returns raw response text."""
         pass
 
-    def evaluate_sample(self, tokens: list[str], few_shot_examples: list[dict]) -> list[str]:
+    def evaluate_sample(self, tokens: list[str], few_shot_examples: list[dict], dataset_name: str = "inlegalner") -> list[str]:
         """
         Evaluate a single sample.
 
         Args:
             tokens: Input tokens.
             few_shot_examples: Few-shot examples for the prompt.
+            dataset_name: Dataset identifier for prompt context.
 
         Returns:
             Predicted BIO tags.
         """
         user_prompt = build_user_prompt(tokens, few_shot_examples)
-        system_prompt = build_system_prompt()
+        system_prompt = build_system_prompt(dataset_name)
         response = self.call_api(system_prompt, user_prompt)
         pred_tags = parse_llm_response(response, tokens)
         return pred_tags
@@ -70,7 +71,7 @@ class LLMEvaluator(ABC):
             true_tags = sample["tags"]
 
             try:
-                pred_tags = self.evaluate_sample(tokens, few_shot_examples)
+                pred_tags = self.evaluate_sample(tokens, few_shot_examples, dataset_name)
                 true_labels.append(true_tags)
                 pred_labels.append(pred_tags)
             except Exception as e:
