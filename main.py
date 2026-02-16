@@ -359,6 +359,184 @@ def _create_re_provider(cls, model_id, api_key, key_name):
     return cls(model_id, api_key)
 
 
+# ===================================================================
+# Event Detection commands
+# ===================================================================
+
+_EVENT_DATASETS = ["events_matter"]
+
+
+def _event_sample_cache_path(dataset_name: str):
+    return config.RESULTS_DIR / f"{dataset_name}_event_llm_samples.json"
+
+
+def _save_event_sample_cache(dataset_name, samples, few_shot_examples, n_samples, n_few_shot):
+    cache = {
+        "dataset_name": dataset_name,
+        "task": "event",
+        "n_samples": n_samples,
+        "n_few_shot": n_few_shot,
+        "samples": [
+            {
+                "sentence": " ".join(s["tokens"]),
+                "tokens": s["tokens"],
+                "tags": s["tags"],
+            }
+            for s in samples
+        ],
+        "few_shot_examples": [
+            {
+                "sentence": " ".join(e["tokens"]),
+                "tokens": e["tokens"],
+                "tags": e["tags"],
+            }
+            for e in few_shot_examples
+        ],
+    }
+    path = _event_sample_cache_path(dataset_name)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(cache, f, indent=2, ensure_ascii=False)
+    print(f"Event sample cache saved to {path} ({n_samples} samples, {n_few_shot} few-shot)")
+    return path
+
+
+def _load_event_sample_cache(dataset_name):
+    path = _event_sample_cache_path(dataset_name)
+    if not path.exists():
+        raise FileNotFoundError(
+            f"No event sample cache found at {path}.\n"
+            f"Run 'python main.py prepare-event-samples --dataset {dataset_name}' first."
+        )
+    with open(path, encoding="utf-8") as f:
+        cache = json.load(f)
+    samples = [{"tokens": s["tokens"], "tags": s["tags"]} for s in cache["samples"]]
+    few_shot = [{"tokens": e["tokens"], "tags": e["tags"]} for e in cache["few_shot_examples"]]
+    print(f"Loaded {len(samples)} cached event samples and {len(few_shot)} few-shot examples from {path}")
+    return samples, few_shot
+
+
+def cmd_stats_event(args):
+    """Print event detection dataset statistics."""
+    from data.event_loader import load_event_dataset, print_event_dataset_stats
+    dataset, tag_column = load_event_dataset(args.dataset)
+    print_event_dataset_stats(dataset, tag_column)
+
+
+def cmd_train_event(args):
+    """Fine-tune BERT model(s) for event detection."""
+    from data.event_loader import load_event_dataset
+    from models.bert_event import train_bert_event_model
+
+    dataset, tag_column = load_event_dataset(args.dataset)
+
+    models_to_train = (
+        list(config.BERT_MODELS.keys()) if args.model == "all" else [args.model]
+    )
+
+    for model_key in models_to_train:
+        if model_key not in config.BERT_MODELS:
+            print(f"Unknown model: {model_key}. Available: {list(config.BERT_MODELS.keys())}")
+            continue
+
+        train_bert_event_model(
+            model_key=model_key,
+            train_dataset=dataset["train"],
+            eval_dataset=dataset["validation"],
+            tag_column=tag_column,
+            dataset_name=args.dataset,
+        )
+
+
+def cmd_evaluate_bert_event(args):
+    """Evaluate trained BERT event detection model(s) on test set."""
+    from data.event_loader import load_event_dataset
+    from models.bert_event import predict_bert_event
+
+    dataset, tag_column = load_event_dataset(args.dataset)
+
+    models_to_eval = (
+        list(config.BERT_MODELS.keys()) if args.model == "all" else [args.model]
+    )
+
+    for model_key in models_to_eval:
+        if model_key not in config.BERT_MODELS:
+            print(f"Unknown model: {model_key}. Available: {list(config.BERT_MODELS.keys())}")
+            continue
+
+        predict_bert_event(
+            model_key=model_key,
+            test_dataset=dataset["test"],
+            tag_column=tag_column,
+            checkpoint_path=args.checkpoint,
+            dataset_name=args.dataset,
+        )
+
+
+def cmd_prepare_event_samples(args):
+    """Prepare and cache event detection test samples for LLM evaluation."""
+    from data.event_loader import load_event_dataset, get_event_llm_samples, get_event_few_shot_examples
+
+    datasets = _EVENT_DATASETS if args.dataset == "all" else [args.dataset]
+    for ds in datasets:
+        print(f"\n{'='*60}")
+        print(f"Preparing event samples for {ds}")
+        print(f"{'='*60}")
+
+        cache_path = _event_sample_cache_path(ds)
+        if cache_path.exists() and not args.resample:
+            print(f"Event sample cache already exists at {cache_path}")
+            print("Use --resample to regenerate.")
+            continue
+
+        dataset, tag_column = load_event_dataset(ds)
+        samples = get_event_llm_samples(dataset, split="test", n=None, tag_column=tag_column)
+        few_shot = get_event_few_shot_examples(dataset, n=config.EVENT_FEW_SHOT_COUNT, tag_column=tag_column)
+        _save_event_sample_cache(ds, samples, few_shot, len(samples), len(few_shot))
+
+
+def cmd_evaluate_llm_event(args):
+    """Evaluate LLM(s) for event detection using cached samples."""
+    from data.event_schema import set_active_event_schema
+    from models.llm_event_providers import OpenAIEventEvaluator, DeepSeekEventEvaluator
+
+    datasets = _EVENT_DATASETS if args.dataset == "all" else [args.dataset]
+    for ds in datasets:
+        print(f"\n{'='*60}")
+        print(f"Event Detection LLM evaluation for {ds}")
+        print(f"{'='*60}")
+
+        set_active_event_schema(ds)
+
+        try:
+            samples, few_shot = _load_event_sample_cache(ds)
+        except FileNotFoundError as e:
+            print(f"Error: {e}")
+            continue
+
+        print(f"Event LLM evaluation on {len(samples)} samples for {ds}")
+
+        providers = {
+            "openai": lambda: _create_re_provider(OpenAIEventEvaluator, config.OPENAI_MODEL, config.OPENAI_API_KEY, "OPENAI_API_KEY"),
+            "deepseek": lambda: _create_re_provider(DeepSeekEventEvaluator, config.DEEPSEEK_MODEL, config.DEEPSEEK_API_KEY, "DEEPSEEK_API_KEY"),
+        }
+
+        providers_to_eval = (
+            list(providers.keys()) if args.provider == "all" else [args.provider]
+        )
+
+        for provider_name in providers_to_eval:
+            if provider_name not in providers:
+                print(f"Unknown provider: {provider_name}. Available: {list(providers.keys())}")
+                continue
+            try:
+                evaluator = providers[provider_name]()
+                if evaluator is None:
+                    continue
+                evaluator.evaluate_dataset(samples, few_shot, provider_name, dataset_name=ds)
+            except Exception as e:
+                print(f"Error evaluating event {provider_name}: {e}")
+
+
 def cmd_compare(args):
     """Generate comparison report from saved results."""
     from evaluation.comparison import generate_comparison_report
@@ -449,6 +627,14 @@ Examples:
   python main.py prepare-re-samples                     # Cache RE test documents
   python main.py evaluate-llm-re --provider openai      # Evaluate LLM for RE
   python main.py evaluate-llm-re --provider all         # Evaluate all LLMs for RE
+
+  # Event Detection (Events Matter):
+  python main.py stats-event                            # Print event dataset statistics
+  python main.py train-event --model all                # Fine-tune BERT event models
+  python main.py evaluate-bert-event --model all        # Evaluate BERT event models
+  python main.py prepare-event-samples                  # Cache event test samples
+  python main.py evaluate-llm-event --provider openai   # Evaluate LLM for events
+  python main.py evaluate-llm-event --provider all      # Evaluate all LLMs for events
         """,
     )
 
@@ -520,8 +706,8 @@ Examples:
     sub = subparsers.add_parser("export-latex", help="Export results as LaTeX tables")
     sub.add_argument(
         "--datasets",
-        default="inlegalner,icdac,ie4wills",
-        help="Comma-separated dataset names (default: inlegalner,icdac,ie4wills)",
+        default="inlegalner,icdac,ie4wills,events_matter",
+        help="Comma-separated dataset names (default: inlegalner,icdac,ie4wills,events_matter)",
     )
     sub.add_argument(
         "--output",
@@ -580,6 +766,76 @@ Examples:
         help="LLM provider to evaluate",
     )
     sub.set_defaults(func=cmd_evaluate_llm_re)
+
+    # --- Event Detection subcommands ---
+
+    # stats-event
+    sub = subparsers.add_parser("stats-event", help="Print event detection dataset statistics")
+    sub.add_argument(
+        "--dataset",
+        default="events_matter",
+        choices=_EVENT_DATASETS,
+        help="Event dataset to use (default: events_matter)",
+    )
+    sub.set_defaults(func=cmd_stats_event)
+
+    # train-event
+    sub = subparsers.add_parser("train-event", help="Fine-tune BERT model(s) for event detection")
+    sub.add_argument(
+        "--model",
+        default="all",
+        help=f"Model to train: {list(config.BERT_MODELS.keys())} or 'all'",
+    )
+    sub.add_argument(
+        "--dataset",
+        default="events_matter",
+        choices=_EVENT_DATASETS,
+        help="Event dataset to use (default: events_matter)",
+    )
+    sub.set_defaults(func=cmd_train_event)
+
+    # evaluate-bert-event
+    sub = subparsers.add_parser("evaluate-bert-event", help="Evaluate trained BERT event detection model(s)")
+    sub.add_argument(
+        "--model",
+        default="all",
+        help=f"Model to evaluate: {list(config.BERT_MODELS.keys())} or 'all'",
+    )
+    sub.add_argument("--checkpoint", default=None, help="Path to model checkpoint")
+    sub.add_argument(
+        "--dataset",
+        default="events_matter",
+        choices=_EVENT_DATASETS,
+        help="Event dataset to use (default: events_matter)",
+    )
+    sub.set_defaults(func=cmd_evaluate_bert_event)
+
+    # prepare-event-samples
+    sub = subparsers.add_parser("prepare-event-samples", help="Cache event detection test samples for LLM evaluation")
+    sub.add_argument("--resample", action="store_true", help="Regenerate cache")
+    sub.add_argument(
+        "--dataset",
+        default="events_matter",
+        choices=_EVENT_DATASETS + ["all"],
+        help="Event dataset to use (default: events_matter)",
+    )
+    sub.set_defaults(func=cmd_prepare_event_samples)
+
+    # evaluate-llm-event
+    sub = subparsers.add_parser("evaluate-llm-event", help="Evaluate LLM(s) for event detection")
+    sub.add_argument(
+        "--provider",
+        default="all",
+        choices=["openai", "deepseek", "all"],
+        help="LLM provider to evaluate",
+    )
+    sub.add_argument(
+        "--dataset",
+        default="events_matter",
+        choices=_EVENT_DATASETS + ["all"],
+        help="Event dataset to use (default: events_matter)",
+    )
+    sub.set_defaults(func=cmd_evaluate_llm_event)
 
     args = parser.parse_args()
 

@@ -103,3 +103,9 @@ RE_TRAIN_CONFIG = {
 }
 RE_NEGATIVE_RATIO = 1.0   # ratio of negative to positive examples for BERT RE training
 RE_FEW_SHOT_COUNT = 3     # fewer than NER because RE examples are larger in prompt
+
+# --- Event Detection Configuration ---
+DATA_DIR = PROJECT_ROOT / "data"
+EVENTS_MATTER_DIR = DATA_DIR / "datasets" / "events_matter" / "EventMattersCorpus" / "annotated"
+EVENT_TRAIN_CONFIG = {**TRAIN_CONFIG}  # Same hyperparams as NER
+EVENT_FEW_SHOT_COUNT = 5
