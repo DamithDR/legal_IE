@@ -89,11 +89,15 @@ LLM_REQUEST_DELAY = 0.5  # seconds between API calls
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+QWEN_API_KEY = os.getenv("QWEN_API_KEY")
+MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY")
 
 # LLM Model IDs
 OPENAI_MODEL = "gpt-4o"
 DEEPSEEK_MODEL = "deepseek-chat"
 CLAUDE_MODEL = "claude-sonnet-4-20250514"
+QWEN_MODEL = "qwen-plus"
+MISTRAL_MODEL = "mistral-large-latest"
 
 # --- RE Configuration ---
 RE_TRAIN_CONFIG = {
@@ -109,3 +113,9 @@ DATA_DIR = PROJECT_ROOT / "data"
 EVENTS_MATTER_DIR = DATA_DIR / "datasets" / "events_matter" / "EventMattersCorpus" / "annotated"
 EVENT_TRAIN_CONFIG = {**TRAIN_CONFIG}  # Same hyperparams as NER
 EVENT_FEW_SHOT_COUNT = 5
+
+# --- Contractual Events Configuration ---
+CONTRACTUAL_EVENTS_DIR = DATA_DIR / "datasets" / "contractual_events"
+CONTRACT_EVENT_TRAIN_CONFIG = {**TRAIN_CONFIG}  # Same hyperparams as NER
+CONTRACT_EVENT_FEW_SHOT_COUNT = 5
+CONTRACTUAL_EVENTS_SPLIT_SEED = 42

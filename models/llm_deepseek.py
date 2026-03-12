@@ -19,6 +19,7 @@ class DeepSeekEvaluator(LLMEvaluator):
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=60),
+        reraise=True,
     )
     def call_api(self, system_prompt: str, user_prompt: str) -> str:
         response = self.client.chat.completions.create(

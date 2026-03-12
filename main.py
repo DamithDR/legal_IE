@@ -166,6 +166,8 @@ def _evaluate_llm_for_dataset(dataset_name, provider_arg):
         "openai": _create_openai_evaluator,
         "deepseek": _create_deepseek_evaluator,
         "claude": _create_claude_evaluator,
+        "qwen": _create_qwen_evaluator,
+        "mistral": _create_mistral_evaluator,
     }
 
     providers_to_eval = (
@@ -221,6 +223,24 @@ def _create_claude_evaluator():
         print("ANTHROPIC_API_KEY not set in .env — skipping Claude.")
         return None
     return ClaudeEvaluator(config.CLAUDE_MODEL, config.ANTHROPIC_API_KEY)
+
+
+def _create_qwen_evaluator():
+    from models.llm_qwen import QwenEvaluator
+
+    if not config.QWEN_API_KEY:
+        print("QWEN_API_KEY not set in .env — skipping Qwen.")
+        return None
+    return QwenEvaluator(config.QWEN_MODEL, config.QWEN_API_KEY)
+
+
+def _create_mistral_evaluator():
+    from models.llm_mistral import MistralEvaluator
+
+    if not config.MISTRAL_API_KEY:
+        print("MISTRAL_API_KEY not set in .env — skipping Mistral.")
+        return None
+    return MistralEvaluator(config.MISTRAL_MODEL, config.MISTRAL_API_KEY)
 
 
 # ===================================================================
@@ -319,7 +339,10 @@ def cmd_prepare_re_samples(args):
 
 def cmd_evaluate_llm_re(args):
     """Evaluate LLM(s) for RE using cached documents."""
-    from models.llm_re_providers import OpenAIREEvaluator, DeepSeekREEvaluator, ClaudeREEvaluator
+    from models.llm_re_providers import (
+        OpenAIREEvaluator, DeepSeekREEvaluator, ClaudeREEvaluator,
+        MistralREEvaluator, QwenREEvaluator,
+    )
 
     try:
         documents, few_shot = _load_re_sample_cache()
@@ -333,6 +356,8 @@ def cmd_evaluate_llm_re(args):
         "openai": lambda: _create_re_provider(OpenAIREEvaluator, config.OPENAI_MODEL, config.OPENAI_API_KEY, "OPENAI_API_KEY"),
         "deepseek": lambda: _create_re_provider(DeepSeekREEvaluator, config.DEEPSEEK_MODEL, config.DEEPSEEK_API_KEY, "DEEPSEEK_API_KEY"),
         "claude": lambda: _create_re_provider(ClaudeREEvaluator, config.CLAUDE_MODEL, config.ANTHROPIC_API_KEY, "ANTHROPIC_API_KEY"),
+        "mistral": lambda: _create_re_provider(MistralREEvaluator, config.MISTRAL_MODEL, config.MISTRAL_API_KEY, "MISTRAL_API_KEY"),
+        "qwen": lambda: _create_re_provider(QwenREEvaluator, config.QWEN_MODEL, config.QWEN_API_KEY, "QWEN_API_KEY"),
     }
 
     providers_to_eval = (
@@ -364,6 +389,7 @@ def _create_re_provider(cls, model_id, api_key, key_name):
 # ===================================================================
 
 _EVENT_DATASETS = ["events_matter"]
+_CONTRACT_EVENT_DATASETS = ["contractual_events"]
 
 
 def _event_sample_cache_path(dataset_name: str):
@@ -497,7 +523,10 @@ def cmd_prepare_event_samples(args):
 def cmd_evaluate_llm_event(args):
     """Evaluate LLM(s) for event detection using cached samples."""
     from data.event_schema import set_active_event_schema
-    from models.llm_event_providers import OpenAIEventEvaluator, DeepSeekEventEvaluator
+    from models.llm_event_providers import (
+        OpenAIEventEvaluator, DeepSeekEventEvaluator, ClaudeEventEvaluator,
+        MistralEventEvaluator, QwenEventEvaluator,
+    )
 
     datasets = _EVENT_DATASETS if args.dataset == "all" else [args.dataset]
     for ds in datasets:
@@ -518,6 +547,9 @@ def cmd_evaluate_llm_event(args):
         providers = {
             "openai": lambda: _create_re_provider(OpenAIEventEvaluator, config.OPENAI_MODEL, config.OPENAI_API_KEY, "OPENAI_API_KEY"),
             "deepseek": lambda: _create_re_provider(DeepSeekEventEvaluator, config.DEEPSEEK_MODEL, config.DEEPSEEK_API_KEY, "DEEPSEEK_API_KEY"),
+            "claude": lambda: _create_re_provider(ClaudeEventEvaluator, config.CLAUDE_MODEL, config.ANTHROPIC_API_KEY, "ANTHROPIC_API_KEY"),
+            "mistral": lambda: _create_re_provider(MistralEventEvaluator, config.MISTRAL_MODEL, config.MISTRAL_API_KEY, "MISTRAL_API_KEY"),
+            "qwen": lambda: _create_re_provider(QwenEventEvaluator, config.QWEN_MODEL, config.QWEN_API_KEY, "QWEN_API_KEY"),
         }
 
         providers_to_eval = (
@@ -535,6 +567,195 @@ def cmd_evaluate_llm_event(args):
                 evaluator.evaluate_dataset(samples, few_shot, provider_name, dataset_name=ds)
             except Exception as e:
                 print(f"Error evaluating event {provider_name}: {e}")
+
+
+# ===================================================================
+# Contract Event Detection commands
+# ===================================================================
+
+def _contract_event_sample_cache_path(dataset_name: str):
+    return config.RESULTS_DIR / f"{dataset_name}_event_llm_samples.json"
+
+
+def _save_contract_event_sample_cache(dataset_name, samples, few_shot_examples, n_samples, n_few_shot):
+    cache = {
+        "dataset_name": dataset_name,
+        "task": "contract_event",
+        "n_samples": n_samples,
+        "n_few_shot": n_few_shot,
+        "samples": [
+            {
+                "sentence": " ".join(s["tokens"]),
+                "tokens": s["tokens"],
+                "tags": s["tags"],
+            }
+            for s in samples
+        ],
+        "few_shot_examples": [
+            {
+                "sentence": " ".join(e["tokens"]),
+                "tokens": e["tokens"],
+                "tags": e["tags"],
+            }
+            for e in few_shot_examples
+        ],
+    }
+    path = _contract_event_sample_cache_path(dataset_name)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(cache, f, indent=2, ensure_ascii=False)
+    print(f"Contract event sample cache saved to {path} ({n_samples} samples, {n_few_shot} few-shot)")
+    return path
+
+
+def _load_contract_event_sample_cache(dataset_name):
+    path = _contract_event_sample_cache_path(dataset_name)
+    if not path.exists():
+        raise FileNotFoundError(
+            f"No contract event sample cache found at {path}.\n"
+            f"Run 'python main.py prepare-contract-event-samples --dataset {dataset_name}' first."
+        )
+    with open(path, encoding="utf-8") as f:
+        cache = json.load(f)
+    samples = [{"tokens": s["tokens"], "tags": s["tags"]} for s in cache["samples"]]
+    few_shot = [{"tokens": e["tokens"], "tags": e["tags"]} for e in cache["few_shot_examples"]]
+    print(f"Loaded {len(samples)} cached contract event samples and {len(few_shot)} few-shot examples from {path}")
+    return samples, few_shot
+
+
+def cmd_stats_contract_event(args):
+    """Print contract event detection dataset statistics."""
+    from data.contract_event_loader import load_contract_event_dataset, print_contract_event_dataset_stats
+    dataset, tag_column = load_contract_event_dataset(args.dataset)
+    print_contract_event_dataset_stats(dataset, tag_column)
+
+
+def cmd_train_contract_event(args):
+    """Fine-tune BERT model(s) for contract event detection."""
+    from data.contract_event_loader import load_contract_event_dataset
+    from models.bert_contract_event import train_bert_contract_event_model
+
+    dataset, tag_column = load_contract_event_dataset(args.dataset)
+
+    models_to_train = (
+        list(config.BERT_MODELS.keys()) if args.model == "all" else [args.model]
+    )
+
+    for model_key in models_to_train:
+        if model_key not in config.BERT_MODELS:
+            print(f"Unknown model: {model_key}. Available: {list(config.BERT_MODELS.keys())}")
+            continue
+
+        train_bert_contract_event_model(
+            model_key=model_key,
+            train_dataset=dataset["train"],
+            eval_dataset=dataset["validation"],
+            tag_column=tag_column,
+            dataset_name=args.dataset,
+        )
+
+
+def cmd_evaluate_bert_contract_event(args):
+    """Evaluate trained BERT contract event detection model(s) on test set."""
+    from data.contract_event_loader import load_contract_event_dataset
+    from models.bert_contract_event import predict_bert_contract_event
+
+    dataset, tag_column = load_contract_event_dataset(args.dataset)
+
+    models_to_eval = (
+        list(config.BERT_MODELS.keys()) if args.model == "all" else [args.model]
+    )
+
+    for model_key in models_to_eval:
+        if model_key not in config.BERT_MODELS:
+            print(f"Unknown model: {model_key}. Available: {list(config.BERT_MODELS.keys())}")
+            continue
+
+        predict_bert_contract_event(
+            model_key=model_key,
+            test_dataset=dataset["test"],
+            tag_column=tag_column,
+            checkpoint_path=args.checkpoint,
+            dataset_name=args.dataset,
+        )
+
+
+def cmd_prepare_contract_event_samples(args):
+    """Prepare and cache contract event detection test samples for LLM evaluation."""
+    from data.contract_event_loader import (
+        load_contract_event_dataset,
+        get_contract_event_llm_samples,
+        get_contract_event_few_shot_examples,
+    )
+
+    datasets = _CONTRACT_EVENT_DATASETS if args.dataset == "all" else [args.dataset]
+    for ds in datasets:
+        print(f"\n{'='*60}")
+        print(f"Preparing contract event samples for {ds}")
+        print(f"{'='*60}")
+
+        cache_path = _contract_event_sample_cache_path(ds)
+        if cache_path.exists() and not args.resample:
+            print(f"Contract event sample cache already exists at {cache_path}")
+            print("Use --resample to regenerate.")
+            continue
+
+        dataset, tag_column = load_contract_event_dataset(ds)
+        n = None if args.full_test else args.sample_size
+        samples = get_contract_event_llm_samples(dataset, split="test", n=n, tag_column=tag_column)
+        few_shot = get_contract_event_few_shot_examples(
+            dataset, n=config.CONTRACT_EVENT_FEW_SHOT_COUNT, tag_column=tag_column
+        )
+        _save_contract_event_sample_cache(ds, samples, few_shot, len(samples), len(few_shot))
+
+
+def cmd_evaluate_llm_contract_event(args):
+    """Evaluate LLM(s) for contract event detection using cached samples."""
+    from data.contract_event_schema import set_active_contract_event_schema
+    from models.llm_contract_event_providers import (
+        OpenAIContractEventEvaluator, DeepSeekContractEventEvaluator,
+        ClaudeContractEventEvaluator, MistralContractEventEvaluator,
+        QwenContractEventEvaluator,
+    )
+
+    datasets = _CONTRACT_EVENT_DATASETS if args.dataset == "all" else [args.dataset]
+    for ds in datasets:
+        print(f"\n{'='*60}")
+        print(f"Contract Event Detection LLM evaluation for {ds}")
+        print(f"{'='*60}")
+
+        set_active_contract_event_schema(ds)
+
+        try:
+            samples, few_shot = _load_contract_event_sample_cache(ds)
+        except FileNotFoundError as e:
+            print(f"Error: {e}")
+            continue
+
+        print(f"Contract Event LLM evaluation on {len(samples)} samples for {ds}")
+
+        providers = {
+            "openai": lambda: _create_re_provider(OpenAIContractEventEvaluator, config.OPENAI_MODEL, config.OPENAI_API_KEY, "OPENAI_API_KEY"),
+            "deepseek": lambda: _create_re_provider(DeepSeekContractEventEvaluator, config.DEEPSEEK_MODEL, config.DEEPSEEK_API_KEY, "DEEPSEEK_API_KEY"),
+            "claude": lambda: _create_re_provider(ClaudeContractEventEvaluator, config.CLAUDE_MODEL, config.ANTHROPIC_API_KEY, "ANTHROPIC_API_KEY"),
+            "mistral": lambda: _create_re_provider(MistralContractEventEvaluator, config.MISTRAL_MODEL, config.MISTRAL_API_KEY, "MISTRAL_API_KEY"),
+            "qwen": lambda: _create_re_provider(QwenContractEventEvaluator, config.QWEN_MODEL, config.QWEN_API_KEY, "QWEN_API_KEY"),
+        }
+
+        providers_to_eval = (
+            list(providers.keys()) if args.provider == "all" else [args.provider]
+        )
+
+        for provider_name in providers_to_eval:
+            if provider_name not in providers:
+                print(f"Unknown provider: {provider_name}. Available: {list(providers.keys())}")
+                continue
+            try:
+                evaluator = providers[provider_name]()
+                if evaluator is None:
+                    continue
+                evaluator.evaluate_dataset(samples, few_shot, provider_name, dataset_name=ds)
+            except Exception as e:
+                print(f"Error evaluating contract event {provider_name}: {e}")
 
 
 def cmd_compare(args):
@@ -635,6 +856,14 @@ Examples:
   python main.py prepare-event-samples                  # Cache event test samples
   python main.py evaluate-llm-event --provider openai   # Evaluate LLM for events
   python main.py evaluate-llm-event --provider all      # Evaluate all LLMs for events
+
+  # Contract Event Detection (Contractual Events):
+  python main.py stats-contract-event                            # Print contract event dataset statistics
+  python main.py train-contract-event --model legal-bert         # Fine-tune BERT contract event model
+  python main.py evaluate-bert-contract-event --model legal-bert # Evaluate BERT contract event model
+  python main.py prepare-contract-event-samples                  # Cache contract event test samples
+  python main.py evaluate-llm-contract-event --provider openai   # Evaluate LLM for contract events
+  python main.py evaluate-llm-contract-event --provider all      # Evaluate all LLMs for contract events
         """,
     )
 
@@ -692,7 +921,7 @@ Examples:
     sub.add_argument(
         "--provider",
         default="all",
-        choices=["openai", "deepseek", "claude", "all"],
+        choices=["openai", "deepseek", "claude", "qwen", "mistral", "all"],
         help="LLM provider to evaluate",
     )
     _add_dataset_arg(sub, allow_all=True)
@@ -706,8 +935,8 @@ Examples:
     sub = subparsers.add_parser("export-latex", help="Export results as LaTeX tables")
     sub.add_argument(
         "--datasets",
-        default="inlegalner,icdac,ie4wills,events_matter",
-        help="Comma-separated dataset names (default: inlegalner,icdac,ie4wills,events_matter)",
+        default="inlegalner,icdac,ie4wills,events_matter,contractual_events",
+        help="Comma-separated dataset names (default: inlegalner,icdac,ie4wills,events_matter,contractual_events)",
     )
     sub.add_argument(
         "--output",
@@ -762,7 +991,7 @@ Examples:
     sub.add_argument(
         "--provider",
         default="all",
-        choices=["openai", "deepseek", "claude", "all"],
+        choices=["openai", "deepseek", "claude", "mistral", "qwen", "all"],
         help="LLM provider to evaluate",
     )
     sub.set_defaults(func=cmd_evaluate_llm_re)
@@ -826,7 +1055,7 @@ Examples:
     sub.add_argument(
         "--provider",
         default="all",
-        choices=["openai", "deepseek", "all"],
+        choices=["openai", "deepseek", "claude", "mistral", "qwen", "all"],
         help="LLM provider to evaluate",
     )
     sub.add_argument(
@@ -836,6 +1065,87 @@ Examples:
         help="Event dataset to use (default: events_matter)",
     )
     sub.set_defaults(func=cmd_evaluate_llm_event)
+
+    # --- Contract Event Detection subcommands ---
+
+    # stats-contract-event
+    sub = subparsers.add_parser("stats-contract-event", help="Print contract event detection dataset statistics")
+    sub.add_argument(
+        "--dataset",
+        default="contractual_events",
+        choices=_CONTRACT_EVENT_DATASETS,
+        help="Contract event dataset to use (default: contractual_events)",
+    )
+    sub.set_defaults(func=cmd_stats_contract_event)
+
+    # train-contract-event
+    sub = subparsers.add_parser("train-contract-event", help="Fine-tune BERT model(s) for contract event detection")
+    sub.add_argument(
+        "--model",
+        default="all",
+        help=f"Model to train: {list(config.BERT_MODELS.keys())} or 'all'",
+    )
+    sub.add_argument(
+        "--dataset",
+        default="contractual_events",
+        choices=_CONTRACT_EVENT_DATASETS,
+        help="Contract event dataset to use (default: contractual_events)",
+    )
+    sub.set_defaults(func=cmd_train_contract_event)
+
+    # evaluate-bert-contract-event
+    sub = subparsers.add_parser("evaluate-bert-contract-event", help="Evaluate trained BERT contract event detection model(s)")
+    sub.add_argument(
+        "--model",
+        default="all",
+        help=f"Model to evaluate: {list(config.BERT_MODELS.keys())} or 'all'",
+    )
+    sub.add_argument("--checkpoint", default=None, help="Path to model checkpoint")
+    sub.add_argument(
+        "--dataset",
+        default="contractual_events",
+        choices=_CONTRACT_EVENT_DATASETS,
+        help="Contract event dataset to use (default: contractual_events)",
+    )
+    sub.set_defaults(func=cmd_evaluate_bert_contract_event)
+
+    # prepare-contract-event-samples
+    sub = subparsers.add_parser("prepare-contract-event-samples", help="Cache contract event detection test samples for LLM evaluation")
+    sub.add_argument(
+        "--sample-size",
+        type=int,
+        default=100,
+        help="Number of test samples for LLM evaluation (default: 100)",
+    )
+    sub.add_argument(
+        "--full-test",
+        action="store_true",
+        help="Use the full test set instead of sampling",
+    )
+    sub.add_argument("--resample", action="store_true", help="Regenerate cache")
+    sub.add_argument(
+        "--dataset",
+        default="contractual_events",
+        choices=_CONTRACT_EVENT_DATASETS + ["all"],
+        help="Contract event dataset to use (default: contractual_events)",
+    )
+    sub.set_defaults(func=cmd_prepare_contract_event_samples)
+
+    # evaluate-llm-contract-event
+    sub = subparsers.add_parser("evaluate-llm-contract-event", help="Evaluate LLM(s) for contract event detection")
+    sub.add_argument(
+        "--provider",
+        default="all",
+        choices=["openai", "deepseek", "claude", "mistral", "qwen", "all"],
+        help="LLM provider to evaluate",
+    )
+    sub.add_argument(
+        "--dataset",
+        default="contractual_events",
+        choices=_CONTRACT_EVENT_DATASETS + ["all"],
+        help="Contract event dataset to use (default: contractual_events)",
+    )
+    sub.set_defaults(func=cmd_evaluate_llm_contract_event)
 
     args = parser.parse_args()
 

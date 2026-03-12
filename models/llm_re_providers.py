@@ -3,6 +3,7 @@
 from openai import OpenAI
 from tenacity import retry, stop_after_attempt, wait_exponential
 import anthropic
+from mistralai import Mistral
 
 from models.llm_re_base import LLMREEvaluator
 
@@ -17,6 +18,7 @@ class OpenAIREEvaluator(LLMREEvaluator):
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=60),
+        reraise=True,
     )
     def call_api(self, system_prompt: str, user_prompt: str) -> str:
         response = self.client.chat.completions.create(
@@ -44,6 +46,7 @@ class DeepSeekREEvaluator(LLMREEvaluator):
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=60),
+        reraise=True,
     )
     def call_api(self, system_prompt: str, user_prompt: str) -> str:
         response = self.client.chat.completions.create(
@@ -68,6 +71,7 @@ class ClaudeREEvaluator(LLMREEvaluator):
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=60),
+        reraise=True,
     )
     def call_api(self, system_prompt: str, user_prompt: str) -> str:
         response = self.client.messages.create(
@@ -80,3 +84,56 @@ class ClaudeREEvaluator(LLMREEvaluator):
             temperature=0.0,
         )
         return response.content[0].text
+
+
+class MistralREEvaluator(LLMREEvaluator):
+    """RE evaluator using Mistral AI's API."""
+
+    def __init__(self, model_name: str, api_key: str):
+        super().__init__(model_name, api_key)
+        self.client = Mistral(api_key=api_key)
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=60),
+        reraise=True,
+    )
+    def call_api(self, system_prompt: str, user_prompt: str) -> str:
+        response = self.client.chat.complete(
+            model=self.model_name,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.0,
+            max_tokens=4096,
+        )
+        return response.choices[0].message.content
+
+
+class QwenREEvaluator(LLMREEvaluator):
+    """RE evaluator using Alibaba's Qwen API (OpenAI-compatible)."""
+
+    def __init__(self, model_name: str, api_key: str):
+        super().__init__(model_name, api_key)
+        self.client = OpenAI(
+            api_key=api_key,
+            base_url="https://dashscope-us.aliyuncs.com/compatible-mode/v1",
+        )
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=60),
+        reraise=True,
+    )
+    def call_api(self, system_prompt: str, user_prompt: str) -> str:
+        response = self.client.chat.completions.create(
+            model=self.model_name,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.0,
+            max_tokens=4096,
+        )
+        return response.choices[0].message.content
